@@ -1,7 +1,7 @@
 """Runs on a GitHub Actions runner: scrape list.am with a real browser, push the snapshot to the Space.
 
 Env: SPACE_URL, HF_TOKEN (read access to the private Space), INGEST_KEY (shared secret),
-     MAX_PRICE (default 220000), DETAIL_COUNT (ad pages to open, default 25).
+     MAX_PRICE (default 220000), DETAIL_COUNT (ad pages to open, default 20).
 Without SPACE_URL it only prints what it found (dry run).
 """
 import asyncio
@@ -18,7 +18,7 @@ from listam.parser import parse_item_dates, parse_item_description, parse_listin
 MAX_PRICE = int(os.environ.get("MAX_PRICE") or 220000)
 URL = os.environ.get("LISTAM_URL") or (
     "https://www.list.am/en/category/56?n=2,3,5,6,7,8,9,13&price2=%d&crc=0&srt=0" % MAX_PRICE)
-DETAIL_COUNT = int(os.environ.get("DETAIL_COUNT") or 25)
+DETAIL_COUNT = int(os.environ.get("DETAIL_COUNT") or 20)
 CHALLENGE_TIMEOUT = 30
 
 
