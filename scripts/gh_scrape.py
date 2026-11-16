@@ -46,11 +46,9 @@ async def scrape():
     async with async_playwright() as p:
         kw = dict(user_data_dir="/tmp/prof", headless=False, locale="en-US", viewport={"width": 1366, "height": 850},
                   args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
-        try:
-            ctx = await p.chromium.launch_persistent_context(channel="chrome", **kw)  # Chrome preinstalled on the runner
-        except Exception as e:
-            print("Chrome channel unavailable (%s), using bundled Chromium" % str(e).splitlines()[0])
-            ctx = await p.chromium.launch_persistent_context(**kw)
+        which = os.environ.get("BROWSER", "chromium")  # "chromium" (Playwright build) or "chrome" (runner's Chrome)
+        print("browser:", which, flush=True)
+        ctx = await p.chromium.launch_persistent_context(**({"channel": "chrome"} if which == "chrome" else {}), **kw)
         try:
             t = time.time()
             cards = parse_listing(await fetch(ctx, URL))

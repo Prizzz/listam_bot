@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: "*/30 * * * *"
   workflow_dispatch:
+    inputs:
+      browser:
+        description: "chromium (Playwright build) or chrome (the runner's Chrome)"
+        default: "chromium"
 concurrency:
   group: scrape-listam
   cancel-in-progress: false
@@ -19,8 +23,12 @@ jobs:
           cache: pip
           cache-dependency-path: scripts/scrape-requirements.txt
       - run: pip install -r scripts/scrape-requirements.txt
+      - name: Install Chromium
+        if: ${{ (github.event.inputs.browser || 'chromium') == 'chromium' }}
+        run: playwright install --with-deps chromium
       - name: Scrape list.am and push to the Space
         env:
+          BROWSER: ${{ github.event.inputs.browser || 'chromium' }}
           SPACE_URL: ${{ vars.SPACE_URL }}
           MAX_PRICE: ${{ vars.MAX_PRICE }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
