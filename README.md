@@ -62,30 +62,37 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
 .venv/bin/python -m pytest tests
 ```
 
-## Hugging Face Space (Gradio SDK): бесплатно, с настоящим браузером
+## Как всё устроено сейчас: Hugging Face Space + раннер GitHub
 
-Почему не Render и не лёгкий режим: с IP дата-центров Cloudflare отклоняет лёгкий HTTP-клиент
-(на раннере GitHub 12 из 12 запросов получили 403), а настоящий Chromium проходит проверку
-(3 из 3, за 2–3 секунды). Браузеру нужна память, которой нет у бесплатного Render (512 МБ), а у
-бесплатного Space 2 vCPU и 16 ГБ.
+Cloudflare не пропускает ни лёгкий клиент, ни даже настоящий Chromium с IP Hugging Face. С раннера GitHub
+Actions браузер проходит. Поэтому:
 
-Файлы Space лежат в `space/`: `app.py` (бот в фоне + `/health` + страница-заглушка Gradio),
-`requirements.txt`, `packages.txt` (системные библиотеки Chromium и Xvfb).
+```
+GitHub Actions (cron */30)  --scripts/gh_scrape.py-->  POST /ingest  -->  HF Space (бот + monitor)  --> Telegram
+   Chromium + Xvfb, list.am                              снимок: 100 карточек + детали            banali.am напрямую
+```
 
-1. huggingface.co → New Space: SDK **Gradio**, шаблон Blank, CPU basic.
-2. Space → Settings → Variables and secrets: секреты `BOT_TOKEN`, `ALLOWED_CHAT_IDS`; при желании
-   переменные `MAX_PRICE`, `BANALI` и т. д. (как в `.env.example`).
-3. `git clone https://huggingface.co/spaces/<user>/<space> ../listam-space` (пароль: токен HF с правом записи).
-4. `scripts/sync_space.sh ../listam-space`, затем `cd ../listam-space && git add -A && git commit -m "Bot" && git push`.
-5. Логи сборки и контейнера: Space → Logs. Ждите `playwright install chromium -> rc=0`, затем
-   в Telegram придут «📌 baseline saved».
-6. Пингер на `https://<user>-<space>.hf.space/health` раз в ~5 минут (GET и HEAD работают): без посетителей
-   бесплатный Space засыпает через 48 часов. У приватного Space нужен заголовок
-   `Authorization: Bearer <токен HF>` (cron-job.org умеет кастомные заголовки бесплатно).
+- Раннер открывает выдачу и страницы ~26 новейших объявлений **с заголовком Referer** (без него Cloudflare
+  проверяет каждую страницу объявления), собирает снимок и шлёт его в Space (`X-Ingest-Key` + токен HF для
+  приватного Space). Запуск занимает ~1 минуту: GitHub округляет до минуты, 48 запусков в сутки ≈ 1440 минут
+  в месяц при бесплатных 2000 для приватного репозитория. Чаще можно только в публичном репозитории.
+- Space сравнивает снимки как раньше: новое, цена, перескок вверх по выдаче = обновление, описание.
+  Свежесть: до ~30 минут (+ задержки cron у GitHub). Если снимок старше 90 минут, бот пишет «blocked».
+- Каждый запуск раннера заодно «будит» Space (его засыпание — 48 часов без посетителей).
+- Команда `/recent` по list.am смотрит только объявления, для которых раннер собрал детали (около 26 новейших).
 
-Ограничения: диска нет (состояние стирается при перезапуске, бот заново молча сохраняет базу и
-пропускает то, что появилось за время простоя); `/maxprice` сбрасывается (меняйте `MAX_PRICE`);
-если имя пакета из `packages.txt` не найдётся в образе Space, сборка упадёт и нужно поправить список по логу.
+### Настройка
+1. **Space** (Gradio SDK, приватный): секреты `BOT_TOKEN`, `ALLOWED_CHAT_IDS`, `INGEST_KEY`.
+2. **GitHub → Settings → Secrets and variables → Actions:** секреты `INGEST_KEY` (тот же) и `HF_TOKEN`
+   (токен HF с правом **только чтения**), переменные `SPACE_URL=https://<user>-<space>.hf.space`, `MAX_PRICE`.
+3. `scripts/sync_space.sh <клон Space>` + `git push` обновляют код Space; workflow лежит в этом репозитории.
+4. Проверка: Actions → scrape-listam → Run workflow; затем `GET <SPACE_URL>/health` (в `snapshot_age_s` секунды
+   с последнего снимка).
+
+Ограничения: диска нет (состояние стирается при перезапуске Space, бот заново молча сохраняет базу);
+`/maxprice` сбрасывается и не влияет на фильтр цены у раннера (он берёт переменную `MAX_PRICE` из GitHub:
+меняйте и там); у ZeroGPU-Space запуск только через `demo.launch()` и с функцией `@spaces.GPU`
+(см. `space/app.py`).
 
 ## Render (устарело для list.am)
 
