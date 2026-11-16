@@ -11,7 +11,7 @@ from typing import Awaitable, Callable, Dict, List
 
 from .config import Config
 from .db import DB
-from .fetcher import Blocked
+from .fetcher import Blocked, Waiting
 from .parser import YEREVAN, Card, desc_hash
 
 log = logging.getLogger("listam.monitor")
@@ -64,6 +64,8 @@ class Monitor:
                 if self.blocked_notified.pop(name, False):
                     for chat in self.cfg.allowed_chats:
                         await self.send(chat, "✅ %s is reachable again" % LABELS.get(name, name))
+            except Waiting as e:
+                log.info("%s: waiting for data (%s)", name, e)
             except Blocked as e:
                 log.warning("blocked: %s", e)
                 if not self.blocked_notified.get(name):
@@ -167,6 +169,8 @@ class Monitor:
                 extra = "%s\n" % html.escape((text[:300] + "…") if len(text) > 300 else text)
             if kinds:
                 await self.send(chat, fmt_card(" · ".join(kinds), c, extra))
+        if text is None and row is not None and row["desc_hash"]:
+            text, h = row["desc_text"], row["desc_hash"]  # source gave no text this time: keep what we knew
         self.db.set_page_info(sid, c.id, text, h, rts)
         await asyncio.sleep(random.uniform(1.5, 4) if not src.has_timestamps else random.uniform(0.2, 0.6))
 

@@ -20,6 +20,10 @@ class Blocked(Exception):
     """Cloudflare did not let us through."""
 
 
+class Waiting(Exception):
+    """The source has no data yet (e.g. no snapshot since the Space started); not an error."""
+
+
 class Fetcher:
     def __init__(self, profile_dir: str, proxy: Optional[str] = None, challenge_timeout: int = 40):
         self.profile_dir = profile_dir
@@ -72,6 +76,17 @@ class Fetcher:
                 await self._restart()
                 return await self._get(url)
 
+    async def _log_challenge(self, page, resp) -> None:
+        """Say what the challenge page looked like, to tell a hard block from an interactive check."""
+        try:
+            text = " ".join((await page.inner_text("body")).split())[:300]
+            frames = [f.url[:90] for f in page.frames if "cloudflare" in f.url or "challenge" in f.url][:3]
+            h = (await resp.all_headers()) if resp else {}
+            log.warning("challenge page: title=%r text=%r frames=%s cf-mitigated=%s server=%s",
+                        await page.title(), text, frames, h.get("cf-mitigated"), h.get("server"))
+        except Exception as e:  # diagnostics must never break the fetch
+            log.warning("could not inspect challenge page: %s", e)
+
     async def _get(self, url: str) -> str:
         page = await self._ctx.new_page()
         try:
@@ -84,6 +99,7 @@ class Fetcher:
                 await asyncio.sleep(2)
                 waited += 2
             else:
+                await self._log_challenge(page, resp)
                 raise Blocked("Cloudflare challenge not passed (status %s)" % (resp.status if resp else "?"))
             if resp is not None and resp.status >= 400 and waited == 0:
                 raise Blocked("HTTP %s" % resp.status)

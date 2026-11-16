@@ -47,6 +47,7 @@ class Config:
     desc_checks_per_cycle: int = 5  # item pages re-opened per search per cycle
     port: Optional[int] = None  # set by Render ($PORT): start the /health server
     ephemeral: bool = False  # no persistent disk: DB is lost on restart/deploy
+    challenge_timeout: int = 40  # seconds a browser waits for Cloudflare's check (CF_TIMEOUT)
     fetcher: str = "http"  # "http" (light, ~40 MB) or "browser" (Chromium under Xvfb, ~1 GB)
     banali: bool = True
     banali_pages: int = 3  # 10 ads per page, newest-updated first
@@ -74,6 +75,7 @@ class Config:
             max_price=int(os.environ.get("MAX_PRICE", DEFAULT_MAX_PRICE)),
             port=int(os.environ["PORT"]) if os.environ.get("PORT", "").isdigit() else None,
             ephemeral=os.environ.get("EPHEMERAL_STATE", "0") == "1",
+            challenge_timeout=int(os.environ.get("CF_TIMEOUT", "40")),
             fetcher=os.environ.get("LISTAM_FETCHER", "http").strip().lower(),
             banali=os.environ.get("BANALI", "1") != "0",
             banali_pages=int(os.environ.get("BANALI_PAGES", "3")),

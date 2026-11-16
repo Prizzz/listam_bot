@@ -19,7 +19,7 @@ from typing import AsyncIterator, List, Optional, Tuple
 
 import aiohttp
 
-from .fetcher import Blocked, Fetcher
+from .fetcher import Blocked, Fetcher, Waiting
 from .parser import Card, parse_item_dates, parse_item_description, parse_listing
 
 log = logging.getLogger("listam.sources")
@@ -71,6 +71,69 @@ class ListAmSource:
                 if old_streak >= 3:  # everything after is older
                     break
             await asyncio.sleep(random.uniform(1.0, 2.5))
+
+
+class SnapshotListAmSource:
+    """list.am data pushed by a GitHub Actions runner (a real browser from an IP Cloudflare accepts).
+
+    The runner POSTs {fetched_at, cards, details} to /ingest; this source serves that snapshot. Details
+    (description, posted/renewed time) exist only for the newest ads, which is where renewals show up.
+    """
+
+    name = "listam"
+    label = "list.am"
+    has_timestamps = False  # order inversions detect renewals, details confirm them
+
+    def __init__(self, holder: dict, exclude: List[str], max_age: int = 90 * 60, grace: int = 45 * 60):
+        self.holder = holder
+        self.exclude = {norm(x) for x in exclude}
+        self.max_age, self.grace = max_age, grace
+        self.started = time.time()
+
+    def _snap(self) -> dict:
+        s = self.holder.get("snapshot")
+        if s is None:
+            if time.time() - self.started < self.grace:
+                raise Waiting("no snapshot received from the GitHub runner yet")
+            raise Blocked("list.am: no snapshot has arrived from the GitHub runner for %d min" % (self.grace // 60))
+        age = time.time() - s["received_at"]
+        if age > self.max_age:
+            raise Blocked("list.am: the latest snapshot is %d min old (is the GitHub workflow running?)" % (age // 60))
+        return s
+
+    async def fetch_cards(self, url: str, max_price: int) -> List[Card]:
+        out = []
+        for c in self._snap()["cards"]:
+            card = Card(id=int(c["id"]), url=c["url"], title=c["title"], price_text=c["price_text"], price=c["price"],
+                        currency=c["currency"], location=c["location"], top=bool(c.get("top")))
+            if card.price is not None and card.currency in ("", "\u058f") and card.price > max_price:
+                continue
+            if norm(card.location) in self.exclude:
+                continue
+            out.append(card)
+        return out
+
+    async def details(self, card: Card) -> Tuple[Optional[str], Optional[int]]:
+        d = self._snap().get("details", {}).get(str(card.id))
+        return (d.get("desc"), d.get("renewed")) if d else (None, None)
+
+    async def recent(self, url: str, max_price: int, cutoff_ts: int):
+        details = self._snap().get("details", {})
+        old_streak = 0
+        for c in await self.fetch_cards(url, max_price):
+            d = details.get(str(c.id))
+            if d is None:
+                if c.top:
+                    continue
+                break  # no details beyond the newest ads: cannot judge further
+            last = max([t for t in (d.get("posted"), d.get("renewed")) if t], default=0)
+            if last >= cutoff_ts:
+                old_streak = 0
+                yield c, d.get("posted"), last
+            elif not c.top:
+                old_streak += 1
+                if old_streak >= 3:
+                    break
 
 
 CURRENCY = {"051": "֏", "840": "$", "978": "€", "643": "₽"}

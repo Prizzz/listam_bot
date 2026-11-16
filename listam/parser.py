@@ -92,6 +92,8 @@ def parse_item_description(html: str) -> Optional[str]:
 
 
 def desc_hash(text: Optional[str]) -> str:
+    if not text:
+        return ""  # "no description known" must never compare as a change
     return hashlib.sha1((text or "").encode("utf-8")).hexdigest()[:16]
 
 

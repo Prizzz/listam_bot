@@ -62,21 +62,32 @@ python -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
 .venv/bin/python -m pytest tests
 ```
 
-## Render: бесплатный веб-сервис + пингер
+## Hugging Face Space (Gradio SDK): бесплатно, с настоящим браузером
 
-`render.yaml` описывает **бесплатный веб-сервис** (Docker, лёгкий образ, регион Frankfurt). Бот слушает
-`$PORT` и отдаёт `GET/HEAD /health` (JSON со статусом и временем последнего цикла).
+Почему не Render и не лёгкий режим: с IP дата-центров Cloudflare отклоняет лёгкий HTTP-клиент
+(на раннере GitHub 12 из 12 запросов получили 403), а настоящий Chromium проходит проверку
+(3 из 3, за 2–3 секунды). Браузеру нужна память, которой нет у бесплатного Render (512 МБ), а у
+бесплатного Space 2 vCPU и 16 ГБ.
 
-1. Репозиторий приватный: в Render подключите GitHub-аккаунт с доступом к нему.
-2. Render → New → Blueprint → выберите репозиторий. `BOT_TOKEN` и `ALLOWED_CHAT_IDS` вводятся в панели
-   Render, в репозиторий их класть нельзя.
-3. **Пингер:** добавьте монитор (UptimeRobot и т. п.) на `https://<имя>.onrender.com/health`, интервал ~5 минут.
-   Без входящих запросов Render усыпляет сервис через 15 минут, и бот перестаёт опрашивать сайты.
-4. Перед запуском остановите бота на других машинах: два экземпляра с одним токеном мешают друг другу.
+Файлы Space лежат в `space/`: `app.py` (бот в фоне + `/health` + страница-заглушка Gradio),
+`requirements.txt`, `packages.txt` (системные библиотеки Chromium и Xvfb).
 
-Ограничения бесплатного тарифа:
-- 750 часов в месяц на весь аккаунт: одного круглосуточного сервиса хватает впритык, второй уже не поместится;
-- диска нет, состояние стирается при каждом перезапуске и деплое: бот заново молча сохраняет базу
-  («📌 baseline saved») и пропускает то, что появилось за время простоя;
-- `/maxprice` сбрасывается: чтобы изменить порог насовсем, поменяйте `MAX_PRICE` в переменных окружения;
-- блокировка Cloudflare с IP Render не проверена: при «blocked after 6 attempts» нужен `PROXY_URL`.
+1. huggingface.co → New Space: SDK **Gradio**, шаблон Blank, CPU basic.
+2. Space → Settings → Variables and secrets: секреты `BOT_TOKEN`, `ALLOWED_CHAT_IDS`; при желании
+   переменные `MAX_PRICE`, `BANALI` и т. д. (как в `.env.example`).
+3. `git clone https://huggingface.co/spaces/<user>/<space> ../listam-space` (пароль: токен HF с правом записи).
+4. `scripts/sync_space.sh ../listam-space`, затем `cd ../listam-space && git add -A && git commit -m "Bot" && git push`.
+5. Логи сборки и контейнера: Space → Logs. Ждите `playwright install chromium -> rc=0`, затем
+   в Telegram придут «📌 baseline saved».
+6. Пингер на `https://<user>-<space>.hf.space/health` раз в ~5 минут (GET и HEAD работают): без посетителей
+   бесплатный Space засыпает через 48 часов. У приватного Space нужен заголовок
+   `Authorization: Bearer <токен HF>` (cron-job.org умеет кастомные заголовки бесплатно).
+
+Ограничения: диска нет (состояние стирается при перезапуске, бот заново молча сохраняет базу и
+пропускает то, что появилось за время простоя); `/maxprice` сбрасывается (меняйте `MAX_PRICE`);
+если имя пакета из `packages.txt` не найдётся в образе Space, сборка упадёт и нужно поправить список по логу.
+
+## Render (устарело для list.am)
+
+`render.yaml` описывает бесплатный веб-сервис. banali.am на нём работает, но list.am блокируется
+Cloudflare (лёгкий клиент с IP Render не проходит), поэтому для обоих сайтов используйте Space.

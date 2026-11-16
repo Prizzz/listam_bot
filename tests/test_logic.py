@@ -252,3 +252,59 @@ def test_health_endpoint():
         finally:
             await runner.cleanup()
     asyncio.run(run())
+
+
+# ---------------- list.am snapshot (pushed by the GitHub runner) ----------------
+def _snap(cards, details=None, age=0):
+    import time as _t
+    return {"received_at": _t.time() - age, "fetched_at": int(_t.time()) - age, "cards": cards, "details": details or {}}
+
+
+def _c(i, price=100000, loc="Kentron", top=False, cur="֏"):
+    return {"id": i, "url": "https://www.list.am/en/item/%d" % i, "title": "Ad %d" % i, "price_text": "%d" % price,
+            "price": price, "currency": cur, "location": loc, "top": top}
+
+
+def test_snapshot_source_states_and_filters():
+    async def run():
+        from listam.fetcher import Blocked, Waiting
+        from listam.sources import SnapshotListAmSource
+        h = {}
+        src = SnapshotListAmSource(h, ["Avan"], max_age=3600, grace=600)
+        with pytest.raises(Waiting): await src.fetch_cards("", 220000)            # just started, nothing yet
+        src.started -= 1000
+        with pytest.raises(Blocked): await src.fetch_cards("", 220000)            # runner never delivered
+        h["snapshot"] = _snap([_c(1), _c(2, 300000), _c(3, loc="Avan"), _c(4, cur="$", price=900)])
+        ids = [c.id for c in await src.fetch_cards("", 220000)]
+        assert ids == [1, 4], ids                                               # over cap and excluded district dropped
+        h["snapshot"] = _snap([_c(1)], age=7200)
+        with pytest.raises(Blocked): await src.fetch_cards("", 220000)            # snapshot too old
+    asyncio.run(run())
+
+
+def test_snapshot_monitor_flow():
+    async def run():
+        import listam.monitor as mod
+        from listam.sources import SnapshotListAmSource
+        async def nosleep(*a, **k): pass
+        mod.asyncio.sleep = nosleep
+        sent = []
+        async def send(chat, text): sent.append(text)
+        h = {}
+        db = DB(os.path.join(tempfile.mkdtemp(), "t.db")); db.ensure_search(1, "l", "u")
+        m = Monitor(Config(bot_token="x", allowed_chats=[1]), db, {"listam": SnapshotListAmSource(h, [])}, send)
+        now = __import__("time").time()
+        h["snapshot"] = _snap([_c(1), _c(2), _c(3)], {"1": {"desc": "text one", "posted": int(now) - 9999, "renewed": None}})
+        await m.cycle(); assert "baseline" in sent[0], sent; sent.clear()
+        await m.cycle(); assert sent == [], sent                                 # identical snapshot -> silence
+        # new ad on top + price drop on ad 2
+        h["snapshot"] = _snap([_c(9), _c(1), _c(2, 90000), _c(3)], {"1": {"desc": "text one", "posted": None, "renewed": None}})
+        await m.cycle()
+        assert sum("New" in s for s in sent) == 1 and sum("Price changed" in s for s in sent) == 1, sent
+        sent.clear()
+        # ad 3 jumps to the top, renewed, description edited
+        r = int(now) - 60
+        h["snapshot"] = _snap([_c(3), _c(9), _c(1), _c(2, 90000)], {"3": {"desc": "brand new text", "posted": None, "renewed": r}})
+        await m.cycle()
+        assert len(sent) == 1 and "Renewed" in sent[0] and "list.am" in sent[0], sent
+    asyncio.run(run())
