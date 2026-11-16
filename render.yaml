@@ -1,0 +1,30 @@
+# Render Blueprint: one Background Worker built from the light Dockerfile (no browser).
+# Without a persistent disk the SQLite DB lives on the instance filesystem and is wiped on every
+# restart/deploy; the bot then silently re-saves a baseline and only misses ads that appeared in between.
+services:
+  - type: worker
+    name: listam
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    region: frankfurt        # closest to Armenia
+    plan: starter            # 512 MB / 0.5 CPU; the bot uses ~170 MB. Name may differ in the dashboard.
+    autoDeploy: true
+    envVars:
+      - key: BOT_TOKEN
+        sync: false          # enter in the Render dashboard, never commit it
+      - key: ALLOWED_CHAT_IDS
+        sync: false
+      - key: LISTAM_FETCHER
+        value: http
+      - key: BANALI
+        value: "1"
+      - key: EPHEMERAL_STATE
+        value: "1"
+      - key: MAX_PRICE
+        value: "220000"      # /maxprice resets on restart; change it here to make it permanent
+      - key: POLL_INTERVAL
+        value: "180"
+      # Uncomment if list.am answers "blocked after 6 attempts" from Render's IPs:
+      # - key: PROXY_URL
+      #   sync: false

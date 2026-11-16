@@ -1,0 +1,13 @@
+FROM mcr.microsoft.com/playwright/python:v1.60.0-noble
+
+RUN apt-get update && apt-get install -y --no-install-recommends xvfb xauth \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements-browser.txt requirements.txt ./
+RUN pip install --no-cache-dir -r requirements-browser.txt
+COPY listam ./listam
+
+# Cloudflare rejects headless Chromium, so run a headed one on a virtual display.
+CMD ["xvfb-run", "-a", "--server-args=-screen 0 1366x850x24", "python", "-m", "listam"]
+# Build with LISTAM_FETCHER=browser in .env; needs ~1-2 GB RAM and shm_size: 1gb.
