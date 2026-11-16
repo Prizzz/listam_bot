@@ -122,7 +122,7 @@ class Monitor:
         inspected = set()
         by_id = {c.id: c for c in cards}
         for iid in bumped[: self.cfg.max_bump_checks]:
-            await self._inspect(s, by_id[iid], alert=True)
+            await self._inspect(s, by_id[iid], alert=True, moved=not src.has_timestamps)
             inspected.add(iid)
 
         for c in new[: self.cfg.max_new_alerts]:
@@ -146,7 +146,7 @@ class Monitor:
                 out.append(x)
         return out
 
-    async def _inspect(self, s, c: Card, alert: bool) -> None:
+    async def _inspect(self, s, c: Card, alert: bool, moved: bool = False) -> None:
         """Fetch ad details, store description hash + update time, optionally alert on changes."""
         sid, chat = s["id"], s["chat_id"]
         src = self.sources[s["source"]]
@@ -164,6 +164,8 @@ class Monitor:
             prev = row["renewed_at"]
             if rts is not None and (rts > prev if prev else rts >= time.time() - 3600):
                 kinds.append("♻️ Renewed %s" % _hm(rts))
+            elif moved and rts is None:
+                kinds.append("♻️ Renewed")  # it jumped up the update-sorted list; the source has no exact time
             if row["desc_hash"] and text is not None and h != row["desc_hash"]:
                 kinds.append("✏️ Description updated")
                 extra = "%s\n" % html.escape((text[:300] + "…") if len(text) > 300 else text)

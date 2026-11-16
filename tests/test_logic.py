@@ -307,4 +307,9 @@ def test_snapshot_monitor_flow():
         h["snapshot"] = _snap([_c(3), _c(9), _c(1), _c(2, 90000)], {"3": {"desc": "brand new text", "posted": None, "renewed": r}})
         await m.cycle()
         assert len(sent) == 1 and "Renewed" in sent[0] and "list.am" in sent[0], sent
+        sent.clear()
+        # ad 2 jumps to the top but the runner got no details for it: still reported as renewed
+        h["snapshot"] = _snap([_c(2, 90000), _c(3), _c(9), _c(1)], {})
+        await m.cycle()
+        assert len(sent) == 1 and "Renewed" in sent[0] and "Ad 2" in sent[0], sent
     asyncio.run(run())

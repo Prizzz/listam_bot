@@ -19,17 +19,18 @@ MAX_PRICE = int(os.environ.get("MAX_PRICE") or 220000)
 URL = os.environ.get("LISTAM_URL") or (
     "https://www.list.am/en/category/56?n=2,3,5,6,7,8,9,13&price2=%d&crc=0&srt=0" % MAX_PRICE)
 DETAIL_COUNT = int(os.environ.get("DETAIL_COUNT") or 25)
-CHALLENGE_TIMEOUT = 60
+CHALLENGE_TIMEOUT = 30
 
 
 class Blocked(Exception):
     pass
 
 
-async def fetch(ctx, url):
+async def fetch(ctx, url, referer=None):
     page = await ctx.new_page()
     try:
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        # Ad pages are only served without a challenge when they look like a click from the listing.
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000, **({"referer": referer} if referer else {}))
         waited = 0
         while waited < CHALLENGE_TIMEOUT and "just a moment" in (await page.title()).lower():
             await asyncio.sleep(1)
@@ -60,7 +61,7 @@ async def scrape():
             details = {}
             for c in wanted:
                 try:
-                    html = await fetch(ctx, c.url)
+                    html = await fetch(ctx, c.url, referer=URL)
                 except Blocked:
                     break  # keep what we have; the Space copes with missing details
                 posted, renewed = parse_item_dates(html)
