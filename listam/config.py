@@ -45,6 +45,7 @@ class Config:
     exclude_locations: List[str] = field(default_factory=list)  # safety net on card.location
     poll_interval: int = 180  # seconds between full cycles
     desc_checks_per_cycle: int = 5  # item pages re-opened per search per cycle
+    port: Optional[int] = None  # set by Render ($PORT): start the /health server
     ephemeral: bool = False  # no persistent disk: DB is lost on restart/deploy
     fetcher: str = "http"  # "http" (light, ~40 MB) or "browser" (Chromium under Xvfb, ~1 GB)
     banali: bool = True
@@ -71,6 +72,7 @@ class Config:
             poll_interval=int(os.environ.get("POLL_INTERVAL", "180")),
             desc_checks_per_cycle=int(os.environ.get("DESC_CHECKS_PER_CYCLE", "5")),
             max_price=int(os.environ.get("MAX_PRICE", DEFAULT_MAX_PRICE)),
+            port=int(os.environ["PORT"]) if os.environ.get("PORT", "").isdigit() else None,
             ephemeral=os.environ.get("EPHEMERAL_STATE", "0") == "1",
             fetcher=os.environ.get("LISTAM_FETCHER", "http").strip().lower(),
             banali=os.environ.get("BANALI", "1") != "0",

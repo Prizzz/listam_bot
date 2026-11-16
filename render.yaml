@@ -1,14 +1,20 @@
-# Render Blueprint: one Background Worker built from the light Dockerfile (no browser).
-# Without a persistent disk the SQLite DB lives on the instance filesystem and is wiped on every
-# restart/deploy; the bot then silently re-saves a baseline and only misses ads that appeared in between.
+# Render Blueprint: one FREE web service built from the light Dockerfile (no browser).
+#
+# A free web service must listen on $PORT (the bot serves /health there) and is put to sleep after
+# 15 minutes without inbound traffic. Point an external pinger (UptimeRobot etc.) at
+#   https://<service>.onrender.com/health   every ~5 minutes
+# to keep it awake. There is no persistent disk: the SQLite DB lives on the instance filesystem and is
+# wiped on every restart/deploy; the bot then silently re-saves a baseline and only misses ads that
+# appeared in between.
 services:
-  - type: worker
+  - type: web
     name: listam
     runtime: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
     region: frankfurt        # closest to Armenia
-    plan: starter            # 512 MB / 0.5 CPU; the bot uses ~170 MB. Name may differ in the dashboard.
+    plan: free
+    healthCheckPath: /health
     autoDeploy: true
     envVars:
       - key: BOT_TOKEN

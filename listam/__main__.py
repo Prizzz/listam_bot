@@ -8,6 +8,7 @@ from .bot import make_bot
 from .config import Config
 from .db import DB
 from .fetcher import Fetcher, HttpFetcher
+from .health import start_health
 from .monitor import Monitor
 from .sources import BanaliSource, ListAmSource
 
@@ -45,9 +46,12 @@ async def main() -> None:
         sources["banali"] = BanaliSource(cfg.exclude_locations, cfg.banali_pages)
     monitor = Monitor(cfg, db, sources, send)
     holder["monitor"] = monitor
+    health = await start_health(cfg.port, monitor) if cfg.port else None
     try:
         await asyncio.gather(dp.start_polling(bot), monitor.run())
     finally:
+        if health:
+            await health.cleanup()
         await fetcher.close()
 
 

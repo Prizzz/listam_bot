@@ -233,3 +233,22 @@ def test_banali_renewal_vs_auto_bump_and_description():
         fk.posts[0] = _post(1, 90000, upd="2026-11-16T00:00:20.000000Z"); await m.cycle()
         assert len(sent) == 1 and "Price changed" in sent[0] and "was ֏100,000" in sent[0], sent
     asyncio.run(run())
+
+
+def test_health_endpoint():
+    async def run():
+        import aiohttp, socket
+        from listam.health import start_health
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0)); port = sk.getsockname()[1]
+        class M: last_cycle_ok = 0.0
+        runner = await start_health(port, M())
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get("http://127.0.0.1:%d/health" % port) as r:
+                    assert r.status == 200 and (await r.json())["status"] == "ok"
+                async with s.head("http://127.0.0.1:%d/health" % port) as r:
+                    assert r.status == 200          # pingers often use HEAD
+        finally:
+            await runner.cleanup()
+    asyncio.run(run())
