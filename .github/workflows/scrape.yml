@@ -1,20 +1,25 @@
 name: scrape-listam
-# Real browser on a GitHub runner (an IP Cloudflare accepts) -> snapshot -> the Hugging Face Space.
+# Real browser on a GitHub runner (an IP Cloudflare accepts) -> snapshots -> the Hugging Face Space.
+# GitHub's cron is unreliable (sometimes one run per many hours), so a run stays alive ~5.5 h, takes a
+# snapshot every 5 minutes and starts its own successor. The cron below only restarts a broken chain.
 on:
   schedule:
-    - cron: "*/5 * * * *"  # the shortest interval GitHub allows; runs may be delayed under load
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
-      browser:
-        description: "chromium (Playwright build) or chrome (the runner's Chrome)"
-        default: "chromium"
+      loop_minutes:
+        description: "How long this run keeps scraping (0 = one snapshot; 330 also starts the next run)"
+        default: "330"
 concurrency:
   group: scrape-listam
   cancel-in-progress: false
+permissions:
+  contents: read
+  actions: write   # to start the next run
 jobs:
   scrape:
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 345
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,20 +29,25 @@ jobs:
           cache-dependency-path: scripts/scrape-requirements.txt
       - run: pip install -r scripts/scrape-requirements.txt
       - name: Cache Playwright browsers
-        id: pw
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
           key: playwright-1.60.0-${{ runner.os }}
       - name: Install Chromium (the runner image already has the system libraries it needs)
-        if: ${{ (github.event.inputs.browser || 'chromium') == 'chromium' }}
         run: playwright install chromium
-      - name: Scrape list.am and push to the Space
+      - name: Scrape list.am and push snapshots to the Space
+        id: scrape
         env:
-          BROWSER: ${{ github.event.inputs.browser || 'chromium' }}
-          CF_TIMEOUT: ${{ vars.CF_TIMEOUT }}
           SPACE_URL: ${{ vars.SPACE_URL }}
           MAX_PRICE: ${{ vars.MAX_PRICE }}
+          CF_TIMEOUT: ${{ vars.CF_TIMEOUT }}
+          LOOP_MINUTES: ${{ github.event.inputs.loop_minutes || '330' }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           INGEST_KEY: ${{ secrets.INGEST_KEY }}
         run: xvfb-run -a --server-args="-screen 0 1366x850x24" python scripts/gh_scrape.py
+      - name: Start the next run
+        # only after a run that delivered snapshots: a config error must not respawn itself in a tight loop
+        if: ${{ !cancelled() && steps.scrape.outcome == 'success' && (github.event_name == 'schedule' || (github.event.inputs.loop_minutes || '330') == '330') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run scrape-listam.yml --ref "${{ github.ref_name }}" -f loop_minutes=330

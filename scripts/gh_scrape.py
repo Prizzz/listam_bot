@@ -1,12 +1,16 @@
-"""Runs on a GitHub Actions runner: scrape list.am with a real browser, push the snapshot to the Space.
+"""Runs on a GitHub Actions runner: scrape list.am with a real browser, push snapshots to the Space.
 
 Env: SPACE_URL, HF_TOKEN (read access to the private Space), INGEST_KEY (shared secret),
-     MAX_PRICE (default 220000), DETAIL_COUNT (ad pages to open, default 20).
+     MAX_PRICE (default 220000), DETAIL_COUNT (ad pages to open per snapshot, default 20),
+     LOOP_MINUTES (keep running this long, one snapshot every INTERVAL seconds; 0 = a single snapshot),
+     INTERVAL (default 300), CF_TIMEOUT (seconds to wait for Cloudflare's check, default 30).
 Without SPACE_URL it only prints what it found (dry run).
 """
 import asyncio
 import json
 import os
+import random
+import shutil
 import sys
 import time
 import urllib.error
@@ -20,6 +24,9 @@ URL = os.environ.get("LISTAM_URL") or (
     "https://www.list.am/en/category/56?n=2,3,5,6,7,8,9,13&price2=%d&crc=0&srt=0" % MAX_PRICE)
 DETAIL_COUNT = int(os.environ.get("DETAIL_COUNT") or 20)
 CHALLENGE_TIMEOUT = int(os.environ.get("CF_TIMEOUT") or 30)
+LOOP_MINUTES = int(os.environ.get("LOOP_MINUTES") or 0)
+INTERVAL = int(os.environ.get("INTERVAL") or 300)
+PROFILE = "/tmp/prof"
 
 
 class Blocked(Exception):
@@ -48,37 +55,34 @@ async def fetch(ctx, url, referer=None):
         await page.close()
 
 
-async def scrape():
-    from playwright.async_api import async_playwright
-    async with async_playwright() as p:
-        kw = dict(user_data_dir="/tmp/prof", headless=False, locale="en-US", viewport={"width": 1366, "height": 850},
-                  args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
-        which = os.environ.get("BROWSER", "chromium")  # "chromium" (Playwright build) or "chrome" (runner's Chrome)
-        print("browser:", which, flush=True)
-        ctx = await p.chromium.launch_persistent_context(**({"channel": "chrome"} if which == "chrome" else {}), **kw)
+async def launch(p):
+    shutil.rmtree(PROFILE, ignore_errors=True)  # a fresh profile = fresh Cloudflare session
+    return await p.chromium.launch_persistent_context(
+        PROFILE, headless=False, locale="en-US", viewport={"width": 1366, "height": 850},
+        args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
+
+
+async def snapshot(ctx):
+    t = time.time()
+    cards = parse_listing(await fetch(ctx, URL))
+    if not cards:
+        raise Blocked("listing parsed to 0 cards")
+    print("listing: %d cards in %.0fs" % (len(cards), time.time() - t), flush=True)
+    # promoted ads first (their order is arbitrary), then the newest-updated regular ones
+    wanted = [c for c in cards if c.top] + [c for c in cards if not c.top][:DETAIL_COUNT]
+    details = {}
+    for c in wanted:
         try:
-            t = time.time()
-            cards = parse_listing(await fetch(ctx, URL))
-            if not cards:
-                raise Blocked("listing parsed to 0 cards")
-            print("listing: %d cards in %.0fs" % (len(cards), time.time() - t), flush=True)
-            # promoted ads first (their order is arbitrary), then the newest-updated regular ones
-            wanted = [c for c in cards if c.top] + [c for c in cards if not c.top][:DETAIL_COUNT]
-            details = {}
-            for c in wanted:
-                try:
-                    html = await fetch(ctx, c.url, referer=URL)
-                except Blocked:
-                    break  # keep what we have; the Space copes with missing details
-                posted, renewed = parse_item_dates(html)
-                details[str(c.id)] = {
-                    "desc": parse_item_description(html),
-                    "posted": int(posted.timestamp()) if posted else None,
-                    "renewed": int(renewed.timestamp()) if renewed else None,
-                }
-            print("details: %d/%d in %.0fs" % (len(details), len(wanted), time.time() - t), flush=True)
-        finally:
-            await ctx.close()
+            html = await fetch(ctx, c.url, referer=URL)
+        except Blocked:
+            break  # keep what we have; the Space copes with missing details
+        posted, renewed = parse_item_dates(html)
+        details[str(c.id)] = {
+            "desc": parse_item_description(html),
+            "posted": int(posted.timestamp()) if posted else None,
+            "renewed": int(renewed.timestamp()) if renewed else None,
+        }
+    print("details: %d/%d in %.0fs" % (len(details), len(wanted), time.time() - t), flush=True)
     return {
         "fetched_at": int(time.time()),
         "cards": [{"id": c.id, "url": c.url, "title": c.title, "price_text": c.price_text, "price": c.price,
@@ -99,22 +103,48 @@ def push(payload):
     for attempt in range(1, 5):  # the Space may be waking up
         try:
             with urllib.request.urlopen(req, timeout=90) as r:
-                print("pushed to Space: HTTP %d %s" % (r.status, r.read()[:100].decode()))
+                print("pushed to Space: HTTP %d %s" % (r.status, r.read()[:100].decode()), flush=True)
                 return
         except (urllib.error.URLError, TimeoutError) as e:
             code = getattr(e, "code", None)
             print("push attempt %d failed: %s" % (attempt, code or e), flush=True)
             if code in (400, 401, 403):
-                raise SystemExit("Space rejected the snapshot (check INGEST_KEY / HF_TOKEN)")
+                raise RuntimeError("Space rejected the snapshot (check INGEST_KEY / HF_TOKEN)")
             time.sleep(20)
-    raise SystemExit("could not push the snapshot to the Space")
+    raise RuntimeError("could not push the snapshot to the Space")
+
+
+async def main():
+    from playwright.async_api import async_playwright
+    end = time.time() + LOOP_MINUTES * 60
+    ok = fails = 0
+    async with async_playwright() as p:
+        ctx = None
+        while True:
+            started = time.time()
+            try:
+                if ctx is None:
+                    ctx = await launch(p)
+                data = await snapshot(ctx)
+                await asyncio.to_thread(push, data)
+                ok += 1
+            except Exception as e:  # Blocked, network, push errors: log, recycle the browser, try again later
+                fails += 1
+                print("snapshot failed (%s: %s); ok=%d failed=%d" % (type(e).__name__, e, ok, fails), flush=True)
+                if ctx is not None:
+                    await ctx.close()
+                    ctx = None
+                if isinstance(e, RuntimeError) and "rejected" in str(e):
+                    raise SystemExit(str(e))  # a config problem, looping will not fix it
+            if LOOP_MINUTES <= 0 or time.time() + INTERVAL > end:
+                break
+            await asyncio.sleep(max(5, INTERVAL - (time.time() - started) + random.uniform(-20, 20)))
+        if ctx is not None:
+            await ctx.close()
+    print("finished: %d ok, %d failed" % (ok, fails))
+    if ok == 0:
+        raise SystemExit("no snapshot could be delivered")
 
 
 if __name__ == "__main__":
-    start = time.time()
-    try:
-        data = asyncio.run(scrape())
-    except Blocked as e:
-        raise SystemExit("BLOCKED: %s" % e)
-    push(data)
-    print("done in %.0fs" % (time.time() - start))
+    asyncio.run(main())
