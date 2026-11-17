@@ -35,6 +35,7 @@ jobs:
       - name: Scrape list.am and push to the Space
         env:
           BROWSER: ${{ github.event.inputs.browser || 'chromium' }}
+          CF_TIMEOUT: ${{ vars.CF_TIMEOUT }}
           SPACE_URL: ${{ vars.SPACE_URL }}
           MAX_PRICE: ${{ vars.MAX_PRICE }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}

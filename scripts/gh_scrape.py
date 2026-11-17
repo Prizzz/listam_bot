@@ -19,7 +19,7 @@ MAX_PRICE = int(os.environ.get("MAX_PRICE") or 220000)
 URL = os.environ.get("LISTAM_URL") or (
     "https://www.list.am/en/category/56?n=2,3,5,6,7,8,9,13&price2=%d&crc=0&srt=0" % MAX_PRICE)
 DETAIL_COUNT = int(os.environ.get("DETAIL_COUNT") or 20)
-CHALLENGE_TIMEOUT = 30
+CHALLENGE_TIMEOUT = int(os.environ.get("CF_TIMEOUT") or 30)
 
 
 class Blocked(Exception):
@@ -36,6 +36,12 @@ async def fetch(ctx, url, referer=None):
             await asyncio.sleep(1)
             waited += 1
         if "just a moment" in (await page.title()).lower():
+            try:
+                text = " ".join((await page.inner_text("body")).split())[:240]
+                frames = [f.url[:80] for f in page.frames if "cloudflare" in f.url][:2]
+                print("challenge page: %r frames=%s" % (text, frames), flush=True)
+            except Exception:
+                pass
             raise Blocked("Cloudflare challenge not passed in %ds" % CHALLENGE_TIMEOUT)
         return await page.content()
     finally:
