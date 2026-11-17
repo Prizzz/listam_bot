@@ -23,7 +23,7 @@ MAX_PRICE = int(os.environ.get("MAX_PRICE") or 220000)
 URL = os.environ.get("LISTAM_URL") or (
     "https://www.list.am/en/category/56?n=2,3,5,6,7,8,9,13&price2=%d&crc=0&srt=0" % MAX_PRICE)
 DETAIL_COUNT = int(os.environ.get("DETAIL_COUNT") or 20)
-CHALLENGE_TIMEOUT = int(os.environ.get("CF_TIMEOUT") or 30)
+CHALLENGE_TIMEOUT = int(os.environ.get("CF_TIMEOUT") or 20)
 LOOP_MINUTES = int(os.environ.get("LOOP_MINUTES") or 0)
 INTERVAL = int(os.environ.get("INTERVAL") or 300)
 PROFILE = "/tmp/prof"
@@ -122,20 +122,25 @@ async def main():
         ctx = None
         while True:
             started = time.time()
-            try:
-                if ctx is None:
-                    ctx = await launch(p)
-                data = await snapshot(ctx)
-                await asyncio.to_thread(push, data)
-                ok += 1
-            except Exception as e:  # Blocked, network, push errors: log, recycle the browser, try again later
+            for attempt in range(1, 5):  # a fresh browser session often passes right after a refusal
+                try:
+                    if ctx is None:
+                        ctx = await launch(p)
+                    data = await snapshot(ctx)
+                    await asyncio.to_thread(push, data)
+                    ok += 1
+                    break
+                except Exception as e:  # Blocked, network, push errors: log, recycle the browser
+                    print("attempt %d failed (%s: %s)" % (attempt, type(e).__name__, e), flush=True)
+                    if ctx is not None:
+                        await ctx.close()
+                        ctx = None
+                    if isinstance(e, RuntimeError) and "rejected" in str(e):
+                        raise SystemExit(str(e))  # a config problem, retrying will not fix it
+                    await asyncio.sleep(random.uniform(3, 8))
+            else:
                 fails += 1
-                print("snapshot failed (%s: %s); ok=%d failed=%d" % (type(e).__name__, e, ok, fails), flush=True)
-                if ctx is not None:
-                    await ctx.close()
-                    ctx = None
-                if isinstance(e, RuntimeError) and "rejected" in str(e):
-                    raise SystemExit(str(e))  # a config problem, looping will not fix it
+                print("snapshot skipped after 4 attempts; ok=%d failed=%d" % (ok, fails), flush=True)
             if LOOP_MINUTES <= 0 or time.time() + INTERVAL > end:
                 break
             await asyncio.sleep(max(5, INTERVAL - (time.time() - started) + random.uniform(-20, 20)))
