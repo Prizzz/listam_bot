@@ -2,7 +2,7 @@ name: scrape-listam
 # Real browser on a GitHub runner (an IP Cloudflare accepts) -> snapshot -> the Hugging Face Space.
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/5 * * * *"  # the shortest interval GitHub allows; runs may be delayed under load
   workflow_dispatch:
     inputs:
       browser:

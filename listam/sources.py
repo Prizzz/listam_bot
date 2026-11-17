@@ -84,7 +84,7 @@ class SnapshotListAmSource:
     label = "list.am"
     has_timestamps = False  # order inversions detect renewals, details confirm them
 
-    def __init__(self, holder: dict, exclude: List[str], max_age: int = 90 * 60, grace: int = 45 * 60):
+    def __init__(self, holder: dict, exclude: List[str], max_age: int = 40 * 60, grace: int = 30 * 60):
         self.holder = holder
         self.exclude = {norm(x) for x in exclude}
         self.max_age, self.grace = max_age, grace
