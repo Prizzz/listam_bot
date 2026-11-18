@@ -42,7 +42,6 @@ jobs:
           MAX_PRICE: ${{ vars.MAX_PRICE }}
           CF_TIMEOUT: ${{ vars.CF_TIMEOUT }}
           LOOP_MINUTES: ${{ github.event.inputs.loop_minutes || '330' }}
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
           INGEST_KEY: ${{ secrets.INGEST_KEY }}
         run: xvfb-run -a --server-args="-screen 0 1366x850x24" python scripts/gh_scrape.py
       - name: Start the next run

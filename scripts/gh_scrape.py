@@ -1,6 +1,7 @@
 """Runs on a GitHub Actions runner: scrape list.am with a real browser, push snapshots to the Space.
 
-Env: SPACE_URL, HF_TOKEN (read access to the private Space), INGEST_KEY (shared secret),
+Env: SPACE_URL (where the bot listens: its /ingest), INGEST_KEY (shared secret),
+     HF_TOKEN (only if the target is a private Hugging Face Space),
      MAX_PRICE (default 220000), DETAIL_COUNT (ad pages to open per snapshot, default 20),
      LOOP_MINUTES (keep running this long, one snapshot every INTERVAL seconds; 0 = a single snapshot),
      INTERVAL (default 300), CF_TIMEOUT (seconds to wait for Cloudflare's check, default 30).
@@ -99,7 +100,8 @@ def push(payload):
     req = urllib.request.Request(
         base + "/ingest", data=json.dumps(payload).encode(), method="POST",
         headers={"Content-Type": "application/json", "X-Ingest-Key": os.environ["INGEST_KEY"],
-                 "Authorization": "Bearer " + os.environ["HF_TOKEN"]})
+                 # only a private Hugging Face Space needs this; Render does not
+                 **({"Authorization": "Bearer " + os.environ["HF_TOKEN"]} if os.environ.get("HF_TOKEN") else {})})
     for attempt in range(1, 5):  # the Space may be waking up
         try:
             with urllib.request.urlopen(req, timeout=90) as r:

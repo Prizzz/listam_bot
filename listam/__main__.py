@@ -54,7 +54,7 @@ async def run(holder: Optional[dict] = None, handle_signals: bool = True) -> Non
         sources["banali"] = BanaliSource(cfg.exclude_locations, cfg.banali_pages)
     monitor = Monitor(cfg, db, sources, send)
     holder["monitor"] = monitor
-    health = await start_health(cfg.port, monitor) if cfg.port else None
+    health = await start_health(cfg.port, monitor, holder) if cfg.port else None
     try:
         await asyncio.gather(dp.start_polling(bot, handle_signals=handle_signals), monitor.run())
     finally:

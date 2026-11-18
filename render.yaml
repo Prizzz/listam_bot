@@ -1,11 +1,11 @@
-# Render Blueprint: one FREE web service built from the light Dockerfile (no browser).
+# Render Blueprint: the bot as a FREE web service (no browser needed).
 #
-# A free web service must listen on $PORT (the bot serves /health there) and is put to sleep after
-# 15 minutes without inbound traffic. Point an external pinger (UptimeRobot etc.) at
-#   https://<service>.onrender.com/health   every ~5 minutes
-# to keep it awake. There is no persistent disk: the SQLite DB lives on the instance filesystem and is
-# wiped on every restart/deploy; the bot then silently re-saves a baseline and only misses ads that
-# appeared in between.
+# list.am is scraped by a GitHub Actions runner (a real browser from an IP Cloudflare accepts), which
+# POSTs snapshots to this service's /ingest every few minutes; that traffic also keeps the free service
+# from sleeping (it sleeps after 15 min without inbound traffic). An external pinger on /health is a
+# good backup. banali.am is fetched directly (plain JSON API).
+# There is no persistent disk: the SQLite DB lives on the instance and is wiped on every restart/deploy;
+# the bot then silently re-saves a baseline and only misses ads that appeared in between.
 services:
   - type: web
     name: listam
@@ -21,16 +21,15 @@ services:
         sync: false          # enter in the Render dashboard, never commit it
       - key: ALLOWED_CHAT_IDS
         sync: false
+      - key: INGEST_KEY
+        sync: false          # the same value as the INGEST_KEY secret in GitHub Actions
       - key: LISTAM_FETCHER
-        value: http
+        value: snapshot      # list.am data comes from the GitHub runner
       - key: BANALI
         value: "1"
       - key: EPHEMERAL_STATE
         value: "1"
       - key: MAX_PRICE
-        value: "220000"      # /maxprice resets on restart; change it here to make it permanent
+        value: "220000"      # /maxprice resets on restart; change it here (and in GitHub) to keep it
       - key: POLL_INTERVAL
         value: "180"
-      # Uncomment if list.am answers "blocked after 6 attempts" from Render's IPs:
-      # - key: PROXY_URL
-      #   sync: false

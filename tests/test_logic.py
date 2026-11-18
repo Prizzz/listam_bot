@@ -313,3 +313,33 @@ def test_snapshot_monitor_flow():
         await m.cycle()
         assert len(sent) == 1 and "Renewed" in sent[0] and "Ad 2" in sent[0], sent
     asyncio.run(run())
+
+
+def test_ingest_endpoint_on_the_light_server():
+    async def run():
+        import aiohttp, socket
+        from listam.health import start_health
+        os.environ["INGEST_KEY"] = "k3y"
+        with socket.socket() as sk:
+            sk.bind(("127.0.0.1", 0)); port = sk.getsockname()[1]
+        class M: last_cycle_ok = 0.0
+        holder = {}
+        runner = await start_health(port, M(), holder)
+        base = "http://127.0.0.1:%d" % port
+        good = {"fetched_at": 1, "cards": [_c(1)], "details": {"1": {"desc": "x", "posted": None, "renewed": None}}}
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.post(base + "/ingest", json=good) as r: assert r.status == 403           # no key
+                async with s.post(base + "/ingest", json=good, headers={"X-Ingest-Key": "bad"}) as r: assert r.status == 403
+                async with s.post(base + "/ingest", json={"cards": [{"id": 1}]}, headers={"X-Ingest-Key": "k3y"}) as r:
+                    assert r.status == 400                                                              # bad payload
+                assert "snapshot" not in holder
+                async with s.post(base + "/ingest", json=good, headers={"X-Ingest-Key": "k3y"}) as r:
+                    assert r.status == 200 and (await r.json())["cards"] == 1
+                assert len(holder["snapshot"]["cards"]) == 1
+                async with s.get(base + "/health") as r:
+                    assert (await r.json())["snapshot_age_s"] is not None
+        finally:
+            await runner.cleanup()
+            os.environ.pop("INGEST_KEY", None)
+    asyncio.run(run())
